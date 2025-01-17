@@ -1,30 +1,39 @@
-import argparse, os
+import warnings, argparse, os
+warnings.filterwarnings('ignore')
+warnings.filterwarnings('ignore', category=UserWarning)
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from model import define, model, parse
-from train import parse as tr_parse
+from train import gpu
+from predict import predict
 parser = argparse.ArgumentParser()
-parser.add_argument('--model',         type=str, help='모델 구성을 입력하세요')
-parser.add_argument('--compile',       type=str, help='모델 컴파일 구성을 입력하세요')
-parser.add_argument('--output',        type=str, help='모델 저장 위치를 입력하세요')
-parser.add_argument('--input',         type=str, help='학습시킬 모델 위치를 입력하세요')
-parser.add_argument('--train-img',     type=str, help='학습시킬 이미지 `폴더` 위치를 입력하세요')
-parser.add_argument('--train-setting', type=str, help='학습시킬 데이터의 설정을 해요')
-parser.add_argument('--val-img',       type=str, help='검증 이미지 `폴더` 위치를 입력하세요')
-parser.add_argument('--val-setting',   type=str, help='검증시킬 데이터의 설정을 해요')
+parser.add_argument('--model',             type=str, help='모델 구성을 입력하세요')
+parser.add_argument('--compile',           type=str, help='모델 컴파일 구성을 입력하세요')
+parser.add_argument('--output',            type=str, help='모델 저장 위치를 입력하세요')
+parser.add_argument('--input',             type=str, help='학습시킬 모델 위치를 입력하세요')
+parser.add_argument('--train-img',         type=str, help='학습시킬 이미지 `폴더` 위치를 입력하세요')
+parser.add_argument('--val-img',           type=str, help='검증 이미지 `폴더` 위치를 입력하세요')
+parser.add_argument('--epoch',             type=int, help='학습 시킬때 돌릴 epoch 크기를 정해요')
+parser.add_argument('--step',              type=int, help='학습 시킬때 돌릴 step의 크기를 정해요')
+parser.add_argument('--mode',              type=str, help='학습 시킬때 돌릴 step의 크기를 정해요')
+parser.add_argument('--batch',             type=int, help='학습 시킬때 돌릴 step의 크기를 정해요')
+parser.add_argument('--predict-img',       type=str, help='예측할 데이터중 이미지를 불러와요')
+parser.add_argument('--shape',             type=str, help='예측할 데이터를 설정해요')
+parser.add_argument('--summary',           type=bool, help='예측할 데이터를 설정해요')
 args = parser.parse_args()
 
 if args.model and args.compile and args.output:
     md = define.Creaft(parse.Model(args.model))
     model.Compile(md, parse.Compile(args.compile))
     model.Save(md, args.output)
-    md.summary()
+    if args.summary:
+        md.summary()
 
-elif args.input:
+if args.input:
     import tensorflow as tf
     md = tf.keras.models.load_model(args.input)
-    if args.train_img != "" and args.val_img != "":
-        val_setting = tr_parse.Setting(args.val_setting)
-        train_setting = tr_parse.Setting(args.train_setting)
+    if args.summary:
+        md.summary()
+    if args.train_img:
         train_datagen = tf.keras.preprocessing.image.ImageDataGenerator(
             rescale=1./255,
             rotation_range=30,
@@ -35,30 +44,43 @@ elif args.input:
             horizontal_flip=True,
             fill_mode='nearest'
         )
-        val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
         train_generator = train_datagen.flow_from_directory(
             args.train_img,
-            target_size=train_setting["Shape"],
-            batch_size=train_setting["Batch"],
-            class_mode=train_setting["Mode"]
+            target_size=tuple(map(int, args.shape.strip('()').split('x'))),
+            batch_size=args.batch,
+            class_mode=args.mode
         )
-
-        validation_generator = val_datagen.flow_from_directory(
-            args.val_img,
-            target_size=train_setting["Shape"],
-            batch_size=train_setting["Batch"],
-            class_mode=train_setting["Mode"]
-        )
-
-        md.fit(
-            train_generator,
-            steps_per_epoch=train_generator.samples // train_generator.batch_size,
-            epochs=10,
-            validation_data=validation_generator,
-            validation_steps=validation_generator.samples // validation_generator.batch_size
-        )
-
-        if args.output == "":
+        gpu.Device()
+        if args.val_img:
+            val_datagen = tf.keras.preprocessing.image.ImageDataGenerator(rescale=1./255)
+            validation_generator = val_datagen.flow_from_directory(
+                args.val_img,
+                target_size=tuple(map(int, args.shape.strip('()').split('x'))),
+                batch_size=args.batch,
+                class_mode=args.mode
+            )
+            md.fit(
+                train_generator,
+                steps_per_epoch=args.step,
+                epochs=args.epoch,
+                validation_data=validation_generator,
+                validation_steps=args.step
+            )
+        else:
+            md.fit(
+                train_generator,
+                steps_per_epoch=args.step,
+                epochs=args.epoch,
+            )
+        if not args.output:
             md.save("train_"+args.input)
         else:
             md.save(args.output)
+
+if args.input:
+    import tensorflow as tf
+    md = tf.keras.models.load_model(args.input)
+    if args.predict_img != None:
+        img_array = predict.ReadImage(args.predict_img, args.shape)
+        predictions = md.predict(img_array)
+        print(predictions)

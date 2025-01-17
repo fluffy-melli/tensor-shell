@@ -1,1 +1,2 @@
 tensorflow == 2.17.0
+tensorflow-gpu == 2.12.0
